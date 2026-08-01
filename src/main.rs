@@ -11,7 +11,7 @@ const HIDAPI_REPORT_LEN: usize = REPORT_PAYLOAD_LEN + 1;
 #[derive(Debug, Parser)]
 #[command(about = "Set DeathAdder V2 and DeathAdder V3 Pro polling rate and DPI")]
 struct Args {
-    /// Polling rate in Hz: 125, 500, or 1000.
+    /// Polling rate in Hz (up to 1000 on V2 or 8000 on V3 Pro wireless).
     #[arg(value_parser = clap::value_parser!(u16))]
     rate: Option<u16>,
 
@@ -41,6 +41,7 @@ struct DeviceProfile {
     name: &'static str,
     transaction_id: u8,
     max_dpi: u16,
+    high_rate_polling: bool,
 }
 
 fn parse_hex_u16(s: &str) -> std::result::Result<u16, String> {
@@ -54,11 +55,13 @@ fn device_profile(pid: u16) -> Result<DeviceProfile> {
             name: "DeathAdder V2",
             transaction_id: 0x3f,
             max_dpi: 20_000,
+            high_rate_polling: false,
         }),
         0x00c3 => Ok(DeviceProfile {
             name: "DeathAdder V3 Pro wireless",
             transaction_id: 0x1f,
             max_dpi: 35_000,
+            high_rate_polling: true,
         }),
         _ => bail!("unsupported Razer product ID {pid:04x}; use 0084 or 00c3"),
     }
@@ -78,12 +81,28 @@ fn target_pids(requested: Option<u16>, detected: impl IntoIterator<Item = u16>) 
     pids
 }
 
-fn rate_code(rate: u16) -> Result<u8> {
+fn rate_code(profile: DeviceProfile, rate: u16) -> Result<u8> {
+    if profile.high_rate_polling {
+        return match rate {
+            8000 => Ok(0x01),
+            4000 => Ok(0x02),
+            2000 => Ok(0x04),
+            1000 => Ok(0x08),
+            500 => Ok(0x10),
+            250 => Ok(0x20),
+            125 => Ok(0x40),
+            _ => bail!("unsupported rate {rate}; use 125, 250, 500, 1000, 2000, 4000, or 8000"),
+        };
+    }
+
     match rate {
         1000 => Ok(0x01),
         500 => Ok(0x02),
         125 => Ok(0x08),
-        _ => bail!("unsupported rate {rate}; use 125, 500, or 1000"),
+        _ => bail!(
+            "unsupported rate {rate} for {}; use 125, 500, or 1000",
+            profile.name
+        ),
     }
 }
 
@@ -118,12 +137,17 @@ fn build_report(
 }
 
 fn build_poll_report(profile: DeviceProfile, rate: u16) -> Result<[u8; REPORT_PAYLOAD_LEN]> {
-    Ok(build_report(
-        profile.transaction_id,
-        0x00,
-        0x05,
-        &[rate_code(rate)?],
-    ))
+    let code = rate_code(profile, rate)?;
+    if profile.high_rate_polling {
+        Ok(build_report(
+            profile.transaction_id,
+            0x00,
+            0x40,
+            &[0x00, code],
+        ))
+    } else {
+        Ok(build_report(profile.transaction_id, 0x00, 0x05, &[code]))
+    }
 }
 
 fn build_dpi_report(profile: DeviceProfile, dpi: u16) -> Result<[u8; REPORT_PAYLOAD_LEN]> {
@@ -145,7 +169,12 @@ fn build_dpi_report(profile: DeviceProfile, dpi: u16) -> Result<[u8; REPORT_PAYL
 }
 
 fn build_get_poll_report(profile: DeviceProfile) -> [u8; REPORT_PAYLOAD_LEN] {
-    build_report(profile.transaction_id, 0x00, 0x85, &[0x00])
+    let command = if profile.high_rate_polling {
+        0xc0
+    } else {
+        0x85
+    };
+    build_report(profile.transaction_id, 0x00, command, &[0x00])
 }
 
 fn build_get_dpi_report(profile: DeviceProfile) -> [u8; REPORT_PAYLOAD_LEN] {
@@ -157,8 +186,22 @@ fn build_get_dpi_report(profile: DeviceProfile) -> [u8; REPORT_PAYLOAD_LEN] {
     )
 }
 
-fn decode_poll_rate(response: &[u8; REPORT_PAYLOAD_LEN]) -> Result<u16> {
-    match response[8] {
+fn decode_poll_rate(profile: DeviceProfile, response: &[u8; REPORT_PAYLOAD_LEN]) -> Result<u16> {
+    let code = response[if profile.high_rate_polling { 9 } else { 8 }];
+    if profile.high_rate_polling {
+        return match code {
+            0x01 => Ok(8000),
+            0x02 => Ok(4000),
+            0x04 => Ok(2000),
+            0x08 => Ok(1000),
+            0x10 => Ok(500),
+            0x20 => Ok(250),
+            0x40 => Ok(125),
+            _ => bail!("device returned unknown polling-rate code 0x{code:02x}"),
+        };
+    }
+
+    match code {
         0x01 => Ok(1000),
         0x02 => Ok(500),
         0x08 => Ok(125),
@@ -341,7 +384,7 @@ fn main() -> Result<()> {
         if args.status {
             let poll_response = send_report(&device, &build_get_poll_report(profile))?;
             let dpi_response = send_report(&device, &build_get_dpi_report(profile))?;
-            let rate = decode_poll_rate(&poll_response)?;
+            let rate = decode_poll_rate(profile, &poll_response)?;
             let (dpi_x, dpi_y) = decode_dpi(&dpi_response);
             println!(
                 "{}: DPI {dpi_x}x{dpi_y}, polling rate {rate} Hz",
@@ -358,10 +401,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn deathadder_v3_pro_polling_report_matches_openrazer() {
-        let report = build_poll_report(device_profile(0x00c3).unwrap(), 1000).unwrap();
+    fn deathadder_v3_pro_8k_polling_report_matches_openrazer() {
+        let report = build_poll_report(device_profile(0x00c3).unwrap(), 8000).unwrap();
 
-        assert_eq!(&report[0..9], &[0x00, 0x1f, 0, 0, 0, 1, 0x00, 0x05, 0x01]);
+        assert_eq!(
+            &report[0..10],
+            &[0x00, 0x1f, 0, 0, 0, 2, 0x00, 0x40, 0x00, 0x01]
+        );
         assert_eq!(
             report[88],
             report[2..88].iter().fold(0, |crc, byte| crc ^ byte)
@@ -382,6 +428,7 @@ mod tests {
             report[88],
             report[2..88].iter().fold(0, |crc, byte| crc ^ byte)
         );
+        assert!(build_poll_report(device_profile(0x0084).unwrap(), 8000).is_err());
     }
 
     #[test]
@@ -394,15 +441,15 @@ mod tests {
         let profile = device_profile(0x00c3).unwrap();
         let poll_request = build_get_poll_report(profile);
         let dpi_request = build_get_dpi_report(profile);
-        assert_eq!(&poll_request[0..8], &[0x00, 0x1f, 0, 0, 0, 1, 0x00, 0x85]);
+        assert_eq!(&poll_request[0..8], &[0x00, 0x1f, 0, 0, 0, 1, 0x00, 0xc0]);
         assert_eq!(
             &dpi_request[0..9],
             &[0x00, 0x1f, 0, 0, 0, 7, 0x04, 0x85, 0x00]
         );
 
         let mut poll_response = [0u8; REPORT_PAYLOAD_LEN];
-        poll_response[8] = 0x01;
-        assert_eq!(decode_poll_rate(&poll_response).unwrap(), 1000);
+        poll_response[9] = 0x01;
+        assert_eq!(decode_poll_rate(profile, &poll_response).unwrap(), 8000);
 
         let mut dpi_response = [0u8; REPORT_PAYLOAD_LEN];
         dpi_response[9..13].copy_from_slice(&[0x06, 0x40, 0x03, 0x20]);

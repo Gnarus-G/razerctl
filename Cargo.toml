@@ -2,7 +2,7 @@
 name = "razerctl"
 version = "0.1.0"
 edition = "2024"
-description = "Minimal Linux polling-rate setter for the Razer Viper V3 Pro wireless receiver"
+description = "Linux polling-rate and DPI control for supported Razer mice"
 license = "MIT"
 
 [dependencies]

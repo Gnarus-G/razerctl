@@ -40,6 +40,12 @@ Set every connected supported mouse to 1000 Hz:
 sudo ./target/release/razerctl 1000
 ```
 
+Set only the DeathAdder V3 Pro wireless to 8 kHz:
+
+```bash
+sudo ./target/release/razerctl --pid 00c3 8000
+```
+
 Set every connected supported mouse's DPI:
 
 ```bash
@@ -58,7 +64,8 @@ Restrict any operation to one model by adding its product ID:
 sudo ./target/release/razerctl --pid 0084 1000 --dpi 1600
 ```
 
-Accepted polling rates for both models are `125`, `500`, and `1000` Hz.
+The DeathAdder V2 accepts `125`, `500`, and `1000` Hz; the DeathAdder V3 Pro
+wireless also accepts `250`, `2000`, `4000`, and `8000` Hz.
 Accepted DPI ranges are `100`-`20000` for the DeathAdder V2 and `100`-`35000`
 for the DeathAdder V3 Pro; when both are connected, the shared maximum is
 `20000`.
