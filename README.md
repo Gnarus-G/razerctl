@@ -1,4 +1,4 @@
-# razer-poll
+# razerctl
 
 Minimal Linux/Rust utility that sets polling rate and DPI without using the
 OpenRazer daemon for these mice:
@@ -25,37 +25,37 @@ sudo systemctl stop openrazer-daemon.service 2>/dev/null || true
 List the Razer HID interfaces:
 
 ```bash
-sudo ./target/release/razer-poll --list
+sudo ./target/release/razerctl --list
 ```
 
 Read the current DPI and polling rate from both mice:
 
 ```bash
-sudo ./target/release/razer-poll --status
+sudo ./target/release/razerctl --status
 ```
 
 Set every connected supported mouse to 1000 Hz:
 
 ```bash
-sudo ./target/release/razer-poll 1000
+sudo ./target/release/razerctl 1000
 ```
 
 Set every connected supported mouse's DPI:
 
 ```bash
-sudo ./target/release/razer-poll --dpi 1600
+sudo ./target/release/razerctl --dpi 1600
 ```
 
 Set both in one invocation:
 
 ```bash
-sudo ./target/release/razer-poll 1000 --dpi 1600
+sudo ./target/release/razerctl 1000 --dpi 1600
 ```
 
 Restrict any operation to one model by adding its product ID:
 
 ```bash
-sudo ./target/release/razer-poll --pid 0084 1000 --dpi 1600
+sudo ./target/release/razerctl --pid 0084 1000 --dpi 1600
 ```
 
 Accepted polling rates for both models are `125`, `500`, and `1000` Hz.
@@ -66,7 +66,7 @@ for the DeathAdder V3 Pro; when both are connected, the shared maximum is
 ## Run without sudo
 
 ```bash
-sudo install -Dm644 99-razer-poll.rules /etc/udev/rules.d/99-razer-poll.rules
+sudo install -Dm644 99-razerctl.rules /etc/udev/rules.d/99-razerctl.rules
 sudo udevadm control --reload-rules
 sudo udevadm trigger
 ```
