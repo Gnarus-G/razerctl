@@ -1,0 +1,11 @@
+[package]
+name = "razer-poll"
+version = "0.1.0"
+edition = "2024"
+description = "Minimal Linux polling-rate setter for the Razer Viper V3 Pro wireless receiver"
+license = "MIT"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+hidapi = { version = "2.6", default-features = false, features = ["linux-static-hidraw"] }
